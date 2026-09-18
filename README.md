@@ -84,37 +84,36 @@ Deleted successfully!
   Original URL  : https://www.google.com/search?q=python
 ```
 
-i tried to handle most error cases, so if you pass a bad URL or try to use an alias thats already taken or look up a code that doesnt exist, it should tell you whats wrong instead of just crashing.
+i tried to handle most of the error cases i could think of, like if you pass some random string thats not a URL, or try to use an alias someones already taken, or look up a code that doesnt exist. it wont just crash on you, itll tell you what went wrong.
 
-## How it works (keeping it short)
+## how it works
 
-So basically every URL gets a short code by converting a counter number into Base62. Base62 just means i use digits + lowercase + uppercase letters as the "alphabet" (62 characters total). The counter starts at 100,000 so the codes always come out to at least a few characters long.
+ok so the short version: theres a counter that starts at 100,000. every time you shorten a URL, i take that counter number and convert it to something called Base62. thats just a fancy way of saying i turn the number into a mix of digits, lowercase letters, and uppercase letters (62 characters total, hence the name). so 100,000 becomes `q0U`, 100,001 becomes `q0V`, and so on.
 
-Everything gets saved in a SQLite database file so your URLs dont disappear when you close the terminal. i went with SQLite because it doesnt need any setup, its just a file, and Python has it built in.
+then the counter goes up by 1 and we do it again next time. thats it. no hashing, no worrying about two URLs accidentally getting the same code. every number is unique so every code is unique.
 
-i didnt use hashing for the short codes because that would mean dealing with collisions (two URLs getting the same code). With a counter thats impossible since each number only gets used once.
+everything gets stored in a SQLite database which is literally just a file called `urls.db`. i picked SQLite because theres nothing to install or set up, Python already has it built in, and it just works.
 
-## How this relates to real URL shorteners
+## how this relates to actual production systems
 
-i read through [this Bitly system design breakdown](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) and tried to follow the same patterns here, just scaled down for a CLI.
+so i found [this system design breakdown of how Bitly works](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) and basically tried to copy the same patterns, just way smaller.
 
-The way i see it, my `shorten` command is doing what a write service would do in production, and `resolve` is the read service. In a real system these would be separate microservices because way more people click short links than create them (like 1000:1 ratio apparently), so you want to scale reads separately from writes.
+like my `shorten` command? thats basically what Bitly's write service does. and `resolve` is their read service. in production those would be completely separate servers because apparently for every 1 person who shortens a URL, like 1000 people end up clicking it. so you need way more read servers than write servers.
 
-The counter in my code lives in a SQLite table. In production it would be a Redis instance. Multiple servers would share that one Redis counter, and each server grabs a batch of numbers at once (like 1000 at a time) so they dont have to keep going back to Redis for every single URL. i dont need batching here obviously, but the idea is the same.
+the counter thing is pretty similar too. Bitly uses Redis for their counter (its fast, sits in memory). when they have like 10 servers all shortening URLs at the same time, each server grabs a batch of counter numbers (like 1000 at once) so they dont all fight over the same Redis instance. i obviously dont need to do that for a CLI tool lol but the concept is there.
 
-i also added an index on the `short_code` column in the database. Without it, looking up a code would mean scanning every single row which gets slow fast. With the index, the database can jump right to the matching row. This is basically the same thing production databases do.
+oh and i added a database index on the `short_code` column. without that, every time you resolve a code itd have to look through every single row in the table. with the index it just jumps straight to the right one. same thing real databases do when they have millions of rows.
 
-A real system would also have a cache (like Redis or Memcached) sitting between the read service and the database to avoid hitting the database for popular links. i skipped that since a CLI doesnt need it, but the code is structured in a way where you could add one.
+a real URL shortener would also have a caching layer so popular links dont hit the database every single time someone clicks them. didnt add that here cause... its a CLI. but if you look at how `resolve` works you can kinda see where youd slot one in.
 
-If you want to read more about all of this, the [Hello Interview writeup](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) goes into way more detail. i also wrote a [reference.md](reference.md) file that maps each production component to what i used in this project.
+theres more detail about all this in the [Hello Interview writeup](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) if youre curious. i also put together a [reference.md](reference.md) that maps out what each part of my code corresponds to in a real production system.
 
-## Project Structure
+## project structure
 
 ```
 ├── main.py           - all the code lives here
 ├── urls.db           - gets created when you first run it (gitignored)
-├── reference.md      - system design notes and how this maps to production
-├── explanation.md    - line by line code walkthrough if you want to understand the code
+├── reference.md      - system design notes
+├── explanation.md    - line by line code walkthrough if youre into that
 └── README.md
 ```
-
