@@ -1,137 +1,78 @@
 # URL Shortener CLI
 
-A command-line URL shortener built in Python. Takes long URLs and generates short, unique codes. Inspired by the system design behind [Bit.ly](https://bitly.com/).
+A Python CLI tool that shortens URLs. No external packages, no API keys, just Python and SQLite.
 
-Built with **only the Python standard library** — no external packages needed.
+## Running It
 
-## How It Works
-
-Every time you shorten a URL, the app:
-
-1. Validates that your URL starts with `http://` or `https://` and has a proper domain
-2. Generates a unique short code using **Base62 encoding** (characters: `0-9`, `a-z`, `A-Z`)
-3. Stores the mapping in a local **SQLite database** (`urls.db`) so it persists across runs
-4. Returns the short code to you
-
-The short code generation uses a **counter-based approach** — the same strategy used by production URL shorteners like Bitly. A counter increments for each new URL, and the counter value is converted to Base62. This guarantees every code is unique with zero possibility of collisions.
-
-## Requirements
-
-- Python 3.6 or higher (no additional packages needed)
-
-## Setup
-
-Clone the repository and you're ready to go:
+You need Python 3.6+. That's it.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/url-shortener.git
 cd url-shortener
+python main.py
 ```
 
-## Commands
+The database (`urls.db`) gets created automatically on first run.
 
-### Shorten a URL
+## Usage
 
-```bash
-python main.py shorten <url>
+**Shorten a URL:**
 ```
-
-**Example:**
+python main.py shorten https://www.google.com/search?q=python
 ```
-$ python main.py shorten https://www.google.com/search?q=python+url+shortener
-
+```
 URL shortened successfully!
-  Original   : https://www.google.com/search?q=python+url+shortener
+  Original   : https://www.google.com/search?q=python
   Short Code : q0U
 ```
 
-### Shorten with a Custom Alias
-
-```bash
-python main.py shorten <url> --alias <your_alias>
+**Use a custom alias instead:**
+```
+python main.py shorten https://github.com --alias github
 ```
 
-**Example:**
+**Get the original URL back:**
 ```
-$ python main.py shorten https://www.github.com --alias github
-
-URL shortened successfully!
-  Original   : https://www.github.com
-  Short Code : github
-  (custom alias)
+python main.py resolve q0U
 ```
 
-### Resolve a Short Code
-
-```bash
-python main.py resolve <code>
+**See everything you've shortened:**
 ```
-
-**Example:**
-```
-$ python main.py resolve github
-
-Resolved successfully!
-  Short Code    : github
-  Original URL  : https://www.github.com
-  Created At    : 2026-09-18 18:30:00
-  Type          : Custom Alias
-```
-
-### List All Shortened URLs
-
-```bash
 python main.py list
 ```
 
-**Example:**
+**Remove one:**
 ```
-$ python main.py list
-
-  Found 2 shortened URL(s):
-
-  Short Code  Original URL                                          Created At           Type
-  ----------  ------------                                          -------------------  ------
-  github      https://www.github.com                                2026-09-18 18:30:00  Custom
-  q0U         https://www.google.com/search?q=python+url+shortener  2026-09-18 18:29:00  Auto
+python main.py delete q0U
 ```
 
-### Delete a Shortened URL
+If you pass a bad URL, a taken alias, or a code that doesn't exist, you'll get a clear error message telling you what went wrong.
 
-```bash
-python main.py delete <code>
-```
+## What's Going On Under the Hood
 
-**Example:**
-```
-$ python main.py delete q0U
+Each URL gets a short code by converting an incrementing counter into Base62 (digits + lowercase + uppercase = 62 characters). The counter starts at 100,000 so codes are always at least 6 characters. Every mapping lives in a SQLite database, so nothing disappears when you close the terminal.
 
-Deleted successfully!
-  Short Code    : q0U
-  Original URL  : https://www.google.com/search?q=python+url+shortener
-```
+No hashing, no collision handling, no retries. Counter goes up, you get a unique code. Simple.
 
-## Error Handling
+## Why This Design Scales
 
-| Scenario | What Happens |
-|---|---|
-| Invalid URL (no http/https) | Error message explaining the format needed |
-| Custom alias already taken | Error message suggesting a different alias |
-| Resolving a code that doesn't exist | Error message saying no URL was found |
-| Deleting a code that doesn't exist | Error message saying no URL was found |
-| Empty custom alias | Error message saying alias cannot be empty |
-| Non-alphanumeric alias | Error message saying only letters and numbers allowed |
+This project follows the same architecture that [Bitly uses in production](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly), adapted for a local CLI.
+
+The `shorten` command is basically a write service. The `resolve` command is a read service. In a real system, you'd run these as separate microservices because reads outnumber writes by ~1000:1, and you want to scale them independently.
+
+The counter lives in its own table. In production, this would be a Redis instance that multiple servers share. Each server grabs a batch of counter values (say 1000 at a time) so they don't need to call Redis on every single request. We don't need that here, but the pattern is the same.
+
+There's an index on the `short_code` column. Without it, every resolve would scan the entire table looking for a match. With it, the database jumps straight to the right row. This is what makes lookups fast even with millions of entries.
+
+A real system would also have a caching layer (Redis or Memcached) sitting in front of the database for hot URLs. We skip that because a CLI doesn't need it, but the read path is structured the same way you'd add one.
+
+For a deeper breakdown of how all this works at scale, check out the [Hello Interview writeup on Bitly](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly). The [reference.md](reference.md) file in this repo also maps each production component to its CLI equivalent.
 
 ## Project Structure
 
 ```
-url-shortener/
-├── main.py          # All application logic
-├── urls.db          # SQLite database (auto-created on first run)
-├── README.md        # This file
-└── reference.md     # System design concepts explained
+├── main.py        - all the code
+├── urls.db        - created on first run, gitignored
+├── reference.md   - system design notes
+└── README.md
 ```
-
-## Design Decisions
-
-See [reference.md](reference.md) for a detailed explanation of the system design concepts behind this project, including why counter-based encoding was chosen over hashing, and how this CLI maps to a production URL shortener architecture.
