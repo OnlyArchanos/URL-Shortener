@@ -1,93 +1,69 @@
-# URL Shortener — System Design Reference
+# How This URL Shortener Actually Works
 
-This document explains the system design concepts behind this URL shortener. It covers why each design decision was made and how this CLI relates to production URL shorteners like Bitly.
+This is a reference file. If you want to understand the design decisions in this project or explain them in an interview, start here.
 
-## The Core Problem
+## The Two Operations
 
-A URL shortener does two things:
+A URL shortener only does two things:
 
-1. **Write operation:** Take a long URL, produce a short unique code, store the mapping
-2. **Read operation:** Take a short code, find the original URL, return it
+1. You give it a long URL, it gives you back a short code and remembers the pairing.
+2. You give it a short code, it gives you back the original URL.
 
-In production systems like Bitly, reads happen far more often than writes. For every 1 URL shortened, the link might get clicked 1000 times. This "read-heavy" pattern influences every design decision.
+That's the whole product. Everything else is about making those two operations fast and reliable at scale.
 
-## How Short Codes Are Generated
+## Generating Short Codes
 
-### Approach 1: Hash-Based (NOT used here)
+There are really only two ways to do this.
 
-Take the URL, run it through a hash function (like MD5 or SHA256), and use the first 6-8 characters as the short code.
+**Hashing** — run the URL through something like MD5, grab the first 6 characters. Problem is, two different URLs can produce the same 6 characters. Now you need collision detection, retry logic, maybe appending random bits. It works, but it's more moving parts than necessary.
 
-**Problem:** Two different URLs could produce the same first 6 characters (a "collision"). You'd need extra logic to detect collisions, retry, or append random characters.
+**Counter** — keep a number that starts at 100,000. Every new URL gets the current number converted to Base62, then the number goes up by one. No two URLs can ever get the same code because no two numbers are the same. This is what we use, and it's what Bitly uses in production.
 
-### Approach 2: Counter-Based with Base62 (USED here)
+## Base62 in 30 Seconds
 
-Keep a counter that starts at 100,000. Each time a URL is shortened:
+You know how hex uses 16 characters (0-9, A-F) to represent numbers? Base62 uses 62: the digits 0-9, lowercase a-z, uppercase A-Z.
 
-1. Read the current counter value
-2. Convert that number to Base62 (using characters `0-9`, `a-z`, `A-Z`)
-3. Increment the counter
-4. Use the Base62 string as the short code
+100,000 in Base62 is `q0U`. 100,001 is `q0V`. Six characters of Base62 can represent about 56.8 billion unique values, which is way more than we'll ever need.
 
-**Why this is better:**
-- **Zero collisions** — every counter value is unique
-- **Predictable length** — starting at 100,000 gives 6+ character codes
-- **Simple** — no collision handling needed
-- **Production-proven** — Bitly uses this approach with a distributed counter (Redis)
+We start the counter at 100,000 instead of 0 so that every code is at least 3 characters. Looks better.
 
-### What is Base62?
+## Where the Data Lives
 
-Regular numbers use 10 digits (0-9). Hexadecimal uses 16 (0-9, A-F). Base62 uses 62: digits 0-9, lowercase a-z, uppercase A-Z. Large numbers become short strings.
+SQLite. The database is a single file called `urls.db` that gets created next to `main.py` on first run.
 
-| Decimal | Base62 |
-|---------|--------|
-| 100,000 | q0U |
-| 100,001 | q0V |
-| 1,000,000 | 4c92 |
+There's a `urls` table with the mappings and a `counter` table that holds exactly one row (the current counter value). There's also an index on the `short_code` column so the database doesn't have to scan every row when you resolve a code.
 
-With 6 characters, Base62 can represent 62^6 = **56.8 billion** unique codes.
+Why SQLite and not Postgres? Because this is a CLI tool for one person. SQLite needs zero setup, ships with Python, and handles everything we need. A production system would use Postgres because it supports multiple connections, replication, network access, etc. But for this use case, SQLite is the right call.
 
-## How This CLI Maps to Production Architecture
+## How This Maps to a Real System
 
-| Production Component | Purpose | CLI Equivalent |
-|---|---|---|
-| Client (web/mobile) | Sends requests | Your terminal |
-| Write Service | Generates codes, saves to DB | `shorten` command |
-| Read Service | Looks up codes, redirects | `resolve` command |
-| Database (PostgreSQL) | Stores URL mappings | SQLite (`urls.db`) |
-| Counter Service (Redis) | Tracks next counter value | `counter` table in SQLite |
-| Database Index | Fast lookups by code | `idx_short_code` index |
-| Cache (Redis) | Stores hot URLs in memory | Not needed at CLI scale |
+Here's the thing that makes this project interesting for interviews: every piece of this CLI has a direct counterpart in how Bitly actually works.
 
-## Why SQLite?
+| What we have | What Bitly has |
+|---|---|
+| `shorten` command | Write Service (separate microservice) |
+| `resolve` command | Read Service (separate microservice) |
+| `urls.db` file | PostgreSQL database |
+| `counter` table | Redis instance storing the global counter |
+| `idx_short_code` index | Database index (same concept, bigger scale) |
+| Your terminal | Web/mobile client hitting an API |
 
-- **Zero config** — the database is just a file, no server to run
-- **Built into Python** — `import sqlite3` works everywhere
-- **Persistent** — data survives program restarts
-- **Indexed** — supports indexes for fast lookups
-- **ACID compliant** — data won't corrupt on crashes
+The reason Bitly splits reads and writes into separate services is that reads happen way more often. Think about it: one person shortens a URL, then thousands of people click on it. So you want to be able to spin up more read servers without touching the write side.
 
-In production, you'd use PostgreSQL for multi-user access, network support, and replication. For a single-user CLI, SQLite is the better choice.
+## The Counter Problem at Scale
 
-## URL Validation
+In our CLI, the counter lives in SQLite. One process, one counter, no issues.
 
-We check two things using Python's `urllib.parse`:
+But if Bitly has 10 write servers all creating URLs at the same time, they all need the next counter value without stepping on each other. Their solution: a single Redis instance that hands out counter values. Redis is fast (single-threaded, in-memory) and supports atomic increments, so two servers can't accidentally grab the same number.
 
-1. **Scheme** — must be `http` or `https`
-2. **Domain** — must have a network location (like `google.com`)
+To cut down on network calls, each server grabs a batch of values at once (like 1000) and uses them locally until they run out, then asks for another batch. Some numbers might get wasted if a server crashes mid-batch, but that's fine. You just need uniqueness, not continuity.
 
-## Error Handling Strategy
+## The Caching Layer We Don't Have
 
-- Errors print to `stderr` (not `stdout`) so they don't mix with normal output
-- Exit code `0` = success, `1` = error (Unix convention)
-- Error messages explain what went wrong and what to do instead
+A production URL shortener puts a cache (Redis, Memcached) between the read service and the database. When someone clicks a short link, the read service checks the cache first. If the URL is there, great, skip the database entirely. If not, look it up in the database and stuff it in the cache for next time.
 
-## Scalability Patterns Used
-
-1. **Counter-based codes** — scales via distributed counter (Redis) shared across servers
-2. **Database indexes** — keeps lookups fast even with billions of rows
-3. **Separated read/write** — `resolve` vs `shorten` mirrors production microservice split
-4. **Data model** — same schema a production system would use
+We don't do this because a CLI doesn't need it. But our `resolve` command follows the same read path where you'd slot one in.
 
 ## Further Reading
 
-- [Hello Interview: Design a URL Shortener Like Bitly](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly)
+The [Hello Interview writeup on Bitly](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) covers all of this in more depth, including how to handle URL expiration, what HTTP status codes to use for redirects (302, not 301), and how to think about database sizing.
