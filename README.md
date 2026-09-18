@@ -30,20 +30,46 @@ URL shortened successfully!
 ```
 python main.py shorten https://github.com --alias github
 ```
+```
+URL shortened successfully!
+  Original   : https://github.com
+  Short Code : github
+  (custom alias)
+```
 
 **Get the original URL back:**
 ```
-python main.py resolve q0U
+python main.py resolve github
+```
+```
+Resolved successfully!
+  Short Code    : github
+  Original URL  : https://github.com
+  Created At    : 2026-09-18 18:30:00
+  Type          : Custom Alias
 ```
 
 **See everything you've shortened:**
 ```
 python main.py list
 ```
+```
+  Found 2 shortened URL(s):
+
+  Short Code  Original URL                                  Created At           Type
+  ----------  ------------                                  -------------------  ------
+  github      https://github.com                            2026-09-18 18:30:00  Custom
+  q0U         https://www.google.com/search?q=python        2026-09-18 18:29:00  Auto
+```
 
 **Remove one:**
 ```
 python main.py delete q0U
+```
+```
+Deleted successfully!
+  Short Code    : q0U
+  Original URL  : https://www.google.com/search?q=python
 ```
 
 If you pass a bad URL, a taken alias, or a code that doesn't exist, you'll get a clear error message telling you what went wrong.
