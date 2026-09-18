@@ -280,6 +280,40 @@ def handle_list_command():
     print()
 
 
+def handle_delete_command(short_code_to_delete):
+    database_connection = get_database_connection()
+    database_cursor = database_connection.cursor()
+
+    database_cursor.execute(
+        "SELECT original_url FROM urls WHERE short_code = ?",
+        (short_code_to_delete,)
+    )
+    found_row = database_cursor.fetchone()
+
+    if found_row is None:
+        print(
+            f"Error: No URL found for short code '{short_code_to_delete}'.",
+            file=sys.stderr
+        )
+        database_connection.close()
+        sys.exit(1)
+
+    deleted_original_url = found_row["original_url"]
+
+    database_cursor.execute(
+        "DELETE FROM urls WHERE short_code = ?",
+        (short_code_to_delete,)
+    )
+
+    database_connection.commit()
+    database_connection.close()
+
+    print(f"\nDeleted successfully!")
+    print(f"  Short Code    : {short_code_to_delete}")
+    print(f"  Original URL  : {deleted_original_url}")
+    print()
+
+
 def build_argument_parser():
     parser = argparse.ArgumentParser(
         prog="urlshort",
@@ -348,6 +382,9 @@ def main():
 
     if parsed_args.command == "list":
         handle_list_command()
+
+    if parsed_args.command == "delete":
+        handle_delete_command(parsed_args.code)
 
 
 if __name__ == "__main__":
