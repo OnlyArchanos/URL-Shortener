@@ -1,10 +1,12 @@
-# URL Shortener CLI
+# URL Shortener CLI (Couldn't decide on a good name so i just decided to name it this)
 
-A Python CLI tool that shortens URLs. No external packages, no API keys, just Python and SQLite.
+A Python CLI tool that shortens URLs.
+This is a simple project, i have used no external packages, no API keys, just Python and SQL.
+I have tried to follow the same architecture that [Bitly uses in production](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly), and kind of changed it for a local CLI.
 
 ## Running It
 
-You need Python 3.6+. That's it.
+You need Python 3.6+. (havent tested it for other versions yet but it should work)
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/url-shortener.git
@@ -14,22 +16,26 @@ python main.py
 
 The database (`urls.db`) gets created automatically on first run.
 
-## Usage
+## Usage (Tried to make the workflow pretty simple here)
 
 **Shorten a URL:**
+
 ```
 python main.py shorten https://www.google.com/search?q=python
 ```
+
 ```
 URL shortened successfully!
   Original   : https://www.google.com/search?q=python
   Short Code : q0U
 ```
 
-**Use a custom alias instead:**
+**You can also pick your own alias if you want:**
+
 ```
 python main.py shorten https://github.com --alias github
 ```
+
 ```
 URL shortened successfully!
   Original   : https://github.com
@@ -37,10 +43,12 @@ URL shortened successfully!
   (custom alias)
 ```
 
-**Get the original URL back:**
+**Get the original URL back from a code:**
+
 ```
 python main.py resolve github
 ```
+
 ```
 Resolved successfully!
   Short Code    : github
@@ -49,10 +57,12 @@ Resolved successfully!
   Type          : Custom Alias
 ```
 
-**See everything you've shortened:**
+**See everything you've shortened so far:**
+
 ```
 python main.py list
 ```
+
 ```
   Found 2 shortened URL(s):
 
@@ -62,43 +72,49 @@ python main.py list
   q0U         https://www.google.com/search?q=python        2026-09-18 18:29:00  Auto
 ```
 
-**Remove one:**
+**Delete one you dont need anymore:**
+
 ```
 python main.py delete q0U
 ```
+
 ```
 Deleted successfully!
   Short Code    : q0U
   Original URL  : https://www.google.com/search?q=python
 ```
 
-If you pass a bad URL, a taken alias, or a code that doesn't exist, you'll get a clear error message telling you what went wrong.
+i tried to handle most error cases, so if you pass a bad URL or try to use an alias thats already taken or look up a code that doesnt exist, it should tell you whats wrong instead of just crashing.
 
-## What's Going On Under the Hood
+## How it works (keeping it short)
 
-Each URL gets a short code by converting an incrementing counter into Base62 (digits + lowercase + uppercase = 62 characters). The counter starts at 100,000 so codes are always at least 6 characters. Every mapping lives in a SQLite database, so nothing disappears when you close the terminal.
+So basically every URL gets a short code by converting a counter number into Base62. Base62 just means i use digits + lowercase + uppercase letters as the "alphabet" (62 characters total). The counter starts at 100,000 so the codes always come out to at least a few characters long.
 
-No hashing, no collision handling, no retries. Counter goes up, you get a unique code. Simple.
+Everything gets saved in a SQLite database file so your URLs dont disappear when you close the terminal. i went with SQLite because it doesnt need any setup, its just a file, and Python has it built in.
 
-## Why This Design Scales
+i didnt use hashing for the short codes because that would mean dealing with collisions (two URLs getting the same code). With a counter thats impossible since each number only gets used once.
 
-This project follows the same architecture that [Bitly uses in production](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly), adapted for a local CLI.
+## How this relates to real URL shorteners
 
-The `shorten` command is basically a write service. The `resolve` command is a read service. In a real system, you'd run these as separate microservices because reads outnumber writes by ~1000:1, and you want to scale them independently.
+i read through [this Bitly system design breakdown](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) and tried to follow the same patterns here, just scaled down for a CLI.
 
-The counter lives in its own table. In production, this would be a Redis instance that multiple servers share. Each server grabs a batch of counter values (say 1000 at a time) so they don't need to call Redis on every single request. We don't need that here, but the pattern is the same.
+The way i see it, my `shorten` command is doing what a write service would do in production, and `resolve` is the read service. In a real system these would be separate microservices because way more people click short links than create them (like 1000:1 ratio apparently), so you want to scale reads separately from writes.
 
-There's an index on the `short_code` column. Without it, every resolve would scan the entire table looking for a match. With it, the database jumps straight to the right row. This is what makes lookups fast even with millions of entries.
+The counter in my code lives in a SQLite table. In production it would be a Redis instance. Multiple servers would share that one Redis counter, and each server grabs a batch of numbers at once (like 1000 at a time) so they dont have to keep going back to Redis for every single URL. i dont need batching here obviously, but the idea is the same.
 
-A real system would also have a caching layer (Redis or Memcached) sitting in front of the database for hot URLs. We skip that because a CLI doesn't need it, but the read path is structured the same way you'd add one.
+i also added an index on the `short_code` column in the database. Without it, looking up a code would mean scanning every single row which gets slow fast. With the index, the database can jump right to the matching row. This is basically the same thing production databases do.
 
-For a deeper breakdown of how all this works at scale, check out the [Hello Interview writeup on Bitly](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly). The [reference.md](reference.md) file in this repo also maps each production component to its CLI equivalent.
+A real system would also have a cache (like Redis or Memcached) sitting between the read service and the database to avoid hitting the database for popular links. i skipped that since a CLI doesnt need it, but the code is structured in a way where you could add one.
+
+If you want to read more about all of this, the [Hello Interview writeup](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) goes into way more detail. i also wrote a [reference.md](reference.md) file that maps each production component to what i used in this project.
 
 ## Project Structure
 
 ```
-├── main.py        - all the code
-├── urls.db        - created on first run, gitignored
-├── reference.md   - system design notes
+├── main.py           - all the code lives here
+├── urls.db           - gets created when you first run it (gitignored)
+├── reference.md      - system design notes and how this maps to production
+├── explanation.md    - line by line code walkthrough if you want to understand the code
 └── README.md
 ```
+
