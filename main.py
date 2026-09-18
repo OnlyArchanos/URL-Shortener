@@ -181,6 +181,105 @@ def handle_shorten_command(url_to_shorten, custom_alias_text):
     print()
 
 
+def handle_resolve_command(short_code_to_find):
+    database_connection = get_database_connection()
+    database_cursor = database_connection.cursor()
+
+    database_cursor.execute(
+        "SELECT original_url, created_at, is_custom FROM urls WHERE short_code = ?",
+        (short_code_to_find,)
+    )
+    found_row = database_cursor.fetchone()
+    database_connection.close()
+
+    if found_row is None:
+        print(
+            f"Error: No URL found for short code '{short_code_to_find}'.",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+    url_type_label = "Custom Alias" if found_row["is_custom"] else "Auto-Generated"
+
+    print(f"\nResolved successfully!")
+    print(f"  Short Code    : {short_code_to_find}")
+    print(f"  Original URL  : {found_row['original_url']}")
+    print(f"  Created At    : {found_row['created_at']}")
+    print(f"  Type          : {url_type_label}")
+    print()
+
+
+URL_DISPLAY_MAX_LENGTH = 60
+
+
+def format_list_table_header(code_column_width, url_column_width):
+    date_column_width = 19
+    type_column_width = 6
+
+    header_text = (
+        f"  {'Short Code':<{code_column_width}}"
+        f"  {'Original URL':<{url_column_width}}"
+        f"  {'Created At':<{date_column_width}}"
+        f"  {'Type':<{type_column_width}}"
+    )
+
+    separator_text = (
+        f"  {'-' * code_column_width}"
+        f"  {'-' * url_column_width}"
+        f"  {'-' * date_column_width}"
+        f"  {'-' * type_column_width}"
+    )
+
+    return header_text + "\n" + separator_text
+
+
+def format_list_table_row(url_row, code_column_width, url_column_width):
+    display_url = url_row["original_url"]
+    if len(display_url) > URL_DISPLAY_MAX_LENGTH:
+        display_url = display_url[:URL_DISPLAY_MAX_LENGTH - 3] + "..."
+
+    type_label = "Custom" if url_row["is_custom"] else "Auto"
+
+    formatted_line = (
+        f"  {url_row['short_code']:<{code_column_width}}"
+        f"  {display_url:<{url_column_width}}"
+        f"  {url_row['created_at']:<19}"
+        f"  {type_label}"
+    )
+
+    return formatted_line
+
+
+def handle_list_command():
+    database_connection = get_database_connection()
+    database_cursor = database_connection.cursor()
+
+    database_cursor.execute(
+        "SELECT short_code, original_url, created_at, is_custom "
+        "FROM urls ORDER BY created_at DESC"
+    )
+    all_url_rows = database_cursor.fetchall()
+    database_connection.close()
+
+    if len(all_url_rows) == 0:
+        print("\nNo shortened URLs found. Use 'shorten' to create one.\n")
+        return
+
+    longest_code = max(len(url_row["short_code"]) for url_row in all_url_rows)
+    code_column_width = max(len("Short Code"), longest_code)
+
+    longest_url = max(len(url_row["original_url"]) for url_row in all_url_rows)
+    url_column_width = max(len("Original URL"), min(longest_url, URL_DISPLAY_MAX_LENGTH))
+
+    print(f"\n  Found {len(all_url_rows)} shortened URL(s):\n")
+    print(format_list_table_header(code_column_width, url_column_width))
+
+    for url_row in all_url_rows:
+        print(format_list_table_row(url_row, code_column_width, url_column_width))
+
+    print()
+
+
 def build_argument_parser():
     parser = argparse.ArgumentParser(
         prog="urlshort",
@@ -243,6 +342,12 @@ def main():
 
     if parsed_args.command == "shorten":
         handle_shorten_command(parsed_args.url, parsed_args.alias)
+
+    if parsed_args.command == "resolve":
+        handle_resolve_command(parsed_args.code)
+
+    if parsed_args.command == "list":
+        handle_list_command()
 
 
 if __name__ == "__main__":
