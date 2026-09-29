@@ -231,3 +231,16 @@ def get_all_urls(database_connection, user_id=None):
 
     all_url_rows = database_cursor.fetchall()
     return all_url_rows
+
+
+def check_if_url_is_expired(url_row):
+    expiry_timestamp = url_row["expires_at"]
+
+    if expiry_timestamp is None:
+        return False
+
+    expiry_datetime = datetime.strptime(expiry_timestamp, "%Y-%m-%d %H:%M:%S")
+    current_datetime = datetime.now()
+
+    return current_datetime > expiry_datetime
+

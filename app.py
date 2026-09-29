@@ -1,3 +1,4 @@
+import os
 from flask import Flask, request, jsonify, redirect
 from database import (
     setup_database,
@@ -8,7 +9,8 @@ from database import (
     save_url_to_database,
     find_url_by_short_code,
     delete_url_from_database,
-    increment_click_count
+    increment_click_count,
+    check_if_url_is_expired
 )
 
 
@@ -31,6 +33,7 @@ def handle_shorten_request():
         return jsonify({"error": "Invalid URL. Must start with http:// or https://"}), 400
 
     custom_alias = request_body.get("alias")
+    ttl_seconds = request_body.get("ttl_seconds")
 
     database_connection = get_database_connection()
 
@@ -47,7 +50,7 @@ def handle_shorten_request():
         chosen_short_code = get_next_short_code(database_connection)
         is_custom = False
 
-    save_url_to_database(database_connection, chosen_short_code, url_to_shorten, is_custom)
+    save_url_to_database(database_connection, chosen_short_code, url_to_shorten, is_custom, ttl_seconds=ttl_seconds)
 
     database_connection.commit()
     database_connection.close()
@@ -59,6 +62,9 @@ def handle_shorten_request():
         "short_url": short_url,
         "original_url": url_to_shorten
     }
+
+    if ttl_seconds is not None:
+        response_data["ttl_seconds"] = ttl_seconds
 
     return jsonify(response_data), 201
 
@@ -72,6 +78,12 @@ def handle_redirect_request(short_code):
     if url_row is None:
         database_connection.close()
         return jsonify({"error": f"No URL found for '{short_code}'"}), 404
+
+    if check_if_url_is_expired(url_row):
+        delete_url_from_database(database_connection, short_code)
+        database_connection.commit()
+        database_connection.close()
+        return jsonify({"error": "This link has expired"}), 410
 
     increment_click_count(database_connection, short_code)
     database_connection.commit()
@@ -87,10 +99,18 @@ def handle_stats_request(short_code):
     database_connection = get_database_connection()
 
     url_row = find_url_by_short_code(database_connection, short_code)
-    database_connection.close()
 
     if url_row is None:
+        database_connection.close()
         return jsonify({"error": f"No URL found for '{short_code}'"}), 404
+
+    if check_if_url_is_expired(url_row):
+        delete_url_from_database(database_connection, short_code)
+        database_connection.commit()
+        database_connection.close()
+        return jsonify({"error": "This link has expired"}), 410
+
+    database_connection.close()
 
     return jsonify({
         "short_code": short_code,
@@ -103,6 +123,12 @@ def handle_stats_request(short_code):
 
 @application.route("/<short_code>", methods=["DELETE"])
 def handle_delete_request(short_code):
+    expected_api_key = os.environ.get("API_KEY")
+    provided_api_key = request.headers.get("X-API-Key")
+
+    if expected_api_key is not None and provided_api_key != expected_api_key:
+        return jsonify({"error": "Invalid or missing API key"}), 401
+
     database_connection = get_database_connection()
 
     url_row = find_url_by_short_code(database_connection, short_code)
