@@ -1,8 +1,8 @@
 # URL Shortener (Couldn't decide on a good name so i just decided to name it this)
 
 A Python URL shortener with both a CLI and a web API.
-Started as a simple CLI project, then i added a Flask web server on top of it. Still no external packages beyond Flask, no API keys from third-party services, just Python and SQL.
-I tried to follow the same architecture that [Bitly uses in production](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly), and kind of adapted it for a local setup.
+Started as a simple CLI project, then i got carried away and added a whole Flask web server on top of it ✌️ Still no external packages beyond Flask, no third-party API keys, just Python and SQL.
+I tried to follow the same architecture that [Bitly uses in production](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly), and kinda adapted it for a local setup.
 
 ## Running It
 
@@ -32,7 +32,7 @@ Runs on `http://localhost:5000` by default.
 
 ## CLI Usage
 
-same as before, all the original commands still work:
+all the original commands still work, nothing changed here:
 
 **Shorten a URL:**
 
@@ -72,7 +72,7 @@ python main.py delete q0U
 
 ## Web API
 
-the web server adds user accounts, link expiry, rate limiting, and an analytics page. here are all the endpoints:
+the web server adds user accounts, link expiry, rate limiting, and an analytics page. this is where it gets fun:
 
 ### Register
 
@@ -86,7 +86,7 @@ curl -X POST http://localhost:5000/register \
 {"message": "User 'alice' created successfully", "api_key": "abc123..."}
 ```
 
-save that `api_key`, you need it for everything else.
+save that `api_key`, you need it for everything else. lose it and you gotta login again.
 
 ### Login
 
@@ -111,7 +111,7 @@ curl -X POST http://localhost:5000/shorten \
 {"short_code": "q0U", "short_url": "http://localhost:5000/q0U", "original_url": "https://www.google.com"}
 ```
 
-you can also pass `"alias": "whatever"` for a custom short code, and `"ttl_seconds": 300` to make it expire after 5 minutes.
+you can also pass `"alias": "whatever"` for a custom short code, and `"ttl_seconds": 300` to make it expire after 5 minutes. pretty nifty.
 
 ### Redirect
 
@@ -143,7 +143,16 @@ you can only delete your own URLs.
 curl http://localhost:5000/analytics -H "X-API-Key: YOUR_API_KEY"
 ```
 
-returns an HTML page with a table of your top 5 URLs sorted by click count.
+returns an HTML page with a table of your top 5 URLs sorted by click count. nothing fancy, just a clean table.
+
+> **windows users:** if you're using PowerShell, `curl` is actually an alias for `Invoke-RestMethod` and the syntax is different. use this instead:
+> ```powershell
+> Invoke-RestMethod -Uri http://localhost:5000/register -Method POST -ContentType "application/json" -Body '{"username":"alice","password":"secret123"}'
+> ```
+> save the api key in a variable with `$key = "YOUR_KEY"` then pass it like:
+> ```powershell
+> Invoke-RestMethod -Uri http://localhost:5000/shorten -Method POST -ContentType "application/json" -Headers @{"X-API-Key"=$key} -Body '{"url":"https://google.com"}'
+> ```
 
 ## Error Codes
 
@@ -159,11 +168,11 @@ returns an HTML page with a table of your top 5 URLs sorted by click count.
 
 ## How It Works
 
-ok so the short version: theres a counter that starts at 100,000. every time you shorten a URL, i take that counter number and convert it to Base62 (digits + lowercase + uppercase = 62 characters). so 100,000 becomes `q0U`, 100,001 becomes `q0V`, and so on. no collisions ever because every number is unique.
+ok so the short version: theres a counter that starts at 100,000. every time you shorten a URL, i take that counter number and convert it to Base62 (digits + lowercase + uppercase = 62 characters). so 100,000 becomes `q0U`, 100,001 becomes `q0V`, and so on. no collisions ever because every number is unique. honestly this part is dead simple and thats the whole point.
 
-the CLI (`main.py`) and the web server (`app.py`) both import from `database.py` which has all the shared logic — database setup, Base62 encoding, URL validation, user auth, everything. they share the same `urls.db` database so you can use both at the same time.
+the CLI (`main.py`) and the web server (`app.py`) both import from `database.py` which has all the shared logic — database setup, Base62 encoding, URL validation, user auth, everything. they share the same `urls.db` database so you can literally use both at the same time.
 
-passwords are hashed with PBKDF2 (100k iterations, random salt). rate limiting uses a sliding window tracked in memory. link expiry checks happen on access — if a link is expired when someone tries to use it, it gets deleted right then.
+passwords are hashed with PBKDF2 (100k iterations, random salt) so even if someone gets the db file they cant just read your password. rate limiting uses a sliding window tracked in memory. link expiry checks happen on access — if a link is expired when someone tries to use it, it gets deleted right then and there 😭
 
 theres more detail in [reference.md](reference.md) about how this maps to real production systems, and [explanation.md](explanation.md) walks through the CLI code line by line. [flask_explanation.md](flask_explanation.md) does the same for the web server.
 

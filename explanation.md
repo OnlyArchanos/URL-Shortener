@@ -1,8 +1,8 @@
-# Code Walkthrough — main.py
+# Code Walkthrough — CLI & Shared Logic
 
-Line-by-line breakdown of every function, variable, and decision in the codebase. If you're trying to understand what the code does or need to explain it to someone, this is the place.
+line-by-line breakdown of every function, variable, and decision in the codebase. if you're trying to understand what the code does or need to explain it to someone, this is the place.
 
----
+**heads up:** the shared functions (database stuff, Base62 encoding, URL validation) used to all live in `main.py` but now live in `database.py`. the web server (`app.py`) imports from the same place. the explanations below still apply — the logic is identical, just the file location changed. for the web server walkthrough, see [flask_explanation.md](flask_explanation.md).
 
 ## The Imports (Lines 1-7)
 

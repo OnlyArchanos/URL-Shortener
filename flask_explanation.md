@@ -4,7 +4,7 @@ this is a walkthrough of `app.py` and the web-related parts of `database.py`. if
 
 ## what even is Flask
 
-Flask is a Python library for building web servers. when you run `python app.py`, it starts a little server on your computer that listens for HTTP requests (like when your browser visits a URL or when you use `curl`). you write Python functions that handle those requests and return responses.
+Flask is a Python library for building web servers. when you run `python app.py`, it starts a little server on your computer that listens for HTTP requests (like when your browser visits a URL or when you use `curl`). you write Python functions that handle those requests and return responses. thats literally it.
 
 the whole thing starts with this:
 
@@ -137,7 +137,7 @@ def check_if_url_is_expired(url_row):
     return datetime.now() > expiry_datetime
 ```
 
-if its expired, we delete the row right then and there and return 410 Gone. this is called "lazy deletion" — we dont have a background job scanning for expired links, we just clean them up when someone tries to use them.
+if its expired, we delete the row right then and there and return 410 Gone. this is called "lazy deletion" — we dont have a background job scanning for expired links, we just clean them up when someone tries to use them. kinda brutal but it works ✌️😭
 
 ## the analytics page
 
