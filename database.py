@@ -320,3 +320,17 @@ def find_user_by_api_key(database_connection, api_key_value):
     user_row = database_cursor.fetchone()
     return user_row
 
+
+def get_top_clicked_urls(database_connection, user_id, result_limit):
+    database_cursor = database_connection.cursor()
+
+    database_cursor.execute(
+        "SELECT short_code, original_url, click_count, created_at "
+        "FROM urls WHERE user_id = ? ORDER BY click_count DESC LIMIT ?",
+        (user_id, result_limit)
+    )
+
+    top_url_rows = database_cursor.fetchall()
+    return top_url_rows
+
+

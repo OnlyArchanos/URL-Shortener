@@ -1,3 +1,5 @@
+import time
+import html
 from flask import Flask, request, jsonify, redirect
 from database import (
     setup_database,
@@ -12,11 +14,37 @@ from database import (
     check_if_url_is_expired,
     create_new_user,
     authenticate_user_login,
-    find_user_by_api_key
+    find_user_by_api_key,
+    get_top_clicked_urls
 )
 
 
 application = Flask(__name__)
+
+request_timestamps_by_ip = {}
+RATE_LIMIT_MAX_REQUESTS = 10
+RATE_LIMIT_WINDOW_SECONDS = 60
+
+
+def check_rate_limit(client_ip_address):
+    current_time = time.time()
+
+    if client_ip_address not in request_timestamps_by_ip:
+        request_timestamps_by_ip[client_ip_address] = []
+
+    window_start_time = current_time - RATE_LIMIT_WINDOW_SECONDS
+    recent_timestamps = [
+        ts for ts in request_timestamps_by_ip[client_ip_address]
+        if ts > window_start_time
+    ]
+
+    request_timestamps_by_ip[client_ip_address] = recent_timestamps
+
+    if len(recent_timestamps) >= RATE_LIMIT_MAX_REQUESTS:
+        return False
+
+    recent_timestamps.append(current_time)
+    return True
 
 
 def get_authenticated_user():
@@ -95,6 +123,9 @@ def handle_login_request():
 
 @application.route("/shorten", methods=["POST"])
 def handle_shorten_request():
+    if not check_rate_limit(request.remote_addr):
+        return jsonify({"error": "Rate limit exceeded. Try again in a minute."}), 429
+
     authenticated_user, auth_error = get_authenticated_user()
     if auth_error is not None:
         return auth_error
@@ -241,6 +272,54 @@ def handle_delete_request(short_code):
         "short_code": short_code,
         "original_url": deleted_original_url
     })
+
+
+@application.route("/analytics")
+def handle_analytics_request():
+    authenticated_user, auth_error = get_authenticated_user()
+    if auth_error is not None:
+        return auth_error
+
+    database_connection = get_database_connection()
+    top_urls = get_top_clicked_urls(database_connection, authenticated_user["id"], 5)
+    database_connection.close()
+
+    username = html.escape(authenticated_user["username"])
+
+    table_rows = ""
+    if len(top_urls) == 0:
+        table_rows = '<tr><td colspan="4" style="text-align:center;padding:20px;">No URLs yet</td></tr>'
+    else:
+        for url_row in top_urls:
+            safe_code = html.escape(str(url_row["short_code"]))
+            safe_url = html.escape(str(url_row["original_url"]))
+            table_rows += (
+                f"<tr>"
+                f"<td>{safe_code}</td>"
+                f"<td>{safe_url}</td>"
+                f"<td>{url_row['click_count']}</td>"
+                f"<td>{url_row['created_at']}</td>"
+                f"</tr>"
+            )
+
+    page_html = (
+        "<!DOCTYPE html>"
+        "<html><head><title>Analytics</title></head>"
+        "<body style='font-family:sans-serif;max-width:800px;margin:40px auto;padding:0 20px;'>"
+        f"<h1>Analytics for {username}</h1>"
+        "<table style='width:100%;border-collapse:collapse;'>"
+        "<tr style='border-bottom:2px solid #333;'>"
+        "<th style='text-align:left;padding:8px;'>Short Code</th>"
+        "<th style='text-align:left;padding:8px;'>Original URL</th>"
+        "<th style='text-align:left;padding:8px;'>Clicks</th>"
+        "<th style='text-align:left;padding:8px;'>Created</th>"
+        "</tr>"
+        f"{table_rows}"
+        "</table>"
+        "</body></html>"
+    )
+
+    return page_html
 
 
 if __name__ == "__main__":
