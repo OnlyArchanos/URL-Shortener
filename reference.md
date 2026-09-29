@@ -62,8 +62,42 @@ To cut down on network calls, each server grabs a batch of values at once (like 
 
 A production URL shortener puts a cache (Redis, Memcached) between the read service and the database. When someone clicks a short link, the read service checks the cache first. If the URL is there, great, skip the database entirely. If not, look it up in the database and stuff it in the cache for next time.
 
-We don't do this because a CLI doesn't need it. But our `resolve` command follows the same read path where you'd slot one in.
+We don't do this because a CLI doesn't need it. But our `resolve` command follows the same read path where you'd slot one in. The web server's `GET /<code>` redirect endpoint is the exact same read path — that's where a cache would go first.
+
+## The Web API Layer
+
+With `app.py`, we now have something that looks a lot closer to what Bitly actually runs. Instead of typing commands in a terminal, you send HTTP requests to endpoints. Here's how they map:
+
+| What we have | What Bitly has |
+|---|---|
+| `POST /shorten` | Write Service API endpoint |
+| `GET /<code>` (redirect) | Read Service / Redirect Service |
+| `GET /stats/<code>` | Analytics API |
+| `DELETE /<code>` | Admin API |
+| `POST /register` + `POST /login` | Auth Service |
+| `GET /analytics` | Dashboard UI |
+| SQLite `urls.db` | PostgreSQL + Redis |
+| In-memory rate limiter | Redis-backed rate limiter / API Gateway |
+
+The interesting part is the read/write split. The redirect endpoint (`GET /<code>`) is public — no authentication needed. That's because in production, this is the hot path. Thousands of people click short links for every one person who creates one. You want this endpoint to be as fast and simple as possible.
+
+Everything else (shortening, stats, delete) requires authentication. In production these would be behind an API gateway that handles auth, rate limiting, and routing. We do it in the application code because we don't need a separate gateway for a dev server.
+
+## Multi-User Data Isolation
+
+Every URL is tagged with a `user_id`. When alice shortens a URL, her user ID gets stored alongside it. When bob tries to see stats or delete that URL, we check if `url_row["user_id"] != authenticated_user["id"]` and return 403 if they don't match.
+
+Redirects ignore this check on purpose — the whole point of a short URL is that anyone can click it.
+
+In production you'd probably use database-level access controls (row-level security in Postgres) or a separate service that handles authorization. Our approach is simpler but follows the same principle: the data layer knows who owns what, and the API layer enforces access.
+
+## Rate Limiting at Scale
+
+Our rate limiter is an in-memory dictionary. Works fine for one server, but if you had 10 servers behind a load balancer, each one would have its own dictionary. Someone could send 10 requests to each server and effectively get 100 requests through.
+
+The production fix: put the rate limit state in Redis. Redis supports atomic increments and key expiry, so you can implement the same sliding window pattern but shared across all servers. Some teams skip this entirely and use an API gateway (like Kong or AWS API Gateway) that handles rate limiting before requests even reach the application.
 
 ## Further Reading
 
 The [Hello Interview writeup on Bitly](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) covers all of this in more depth, including how to handle URL expiration, what HTTP status codes to use for redirects (302, not 301), and how to think about database sizing.
+

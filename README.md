@@ -1,22 +1,38 @@
-# URL Shortener CLI (Couldn't decide on a good name so i just decided to name it this)
+# URL Shortener (Couldn't decide on a good name so i just decided to name it this)
 
-A Python CLI tool that shortens URLs.
-This is a simple project, i have used no external packages, no API keys, just Python and SQL.
-I have tried to follow the same architecture that [Bitly uses in production](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly), and kind of changed it for a local CLI.
+A Python URL shortener with both a CLI and a web API.
+Started as a simple CLI project, then i added a Flask web server on top of it. Still no external packages beyond Flask, no API keys from third-party services, just Python and SQL.
+I tried to follow the same architecture that [Bitly uses in production](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly), and kind of adapted it for a local setup.
 
 ## Running It
 
-You need Python 3.6+. (havent tested it for other versions yet but it should work)
+You need Python 3.6+.
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/url-shortener.git
 cd url-shortener
-python main.py
+pip install -r requirements.txt
 ```
 
 The database (`urls.db`) gets created automatically on first run.
 
-## Usage (Tried to make the workflow pretty simple here)
+### CLI
+
+```bash
+python main.py
+```
+
+### Web Server
+
+```bash
+python app.py
+```
+
+Runs on `http://localhost:5000` by default.
+
+## CLI Usage
+
+same as before, all the original commands still work:
 
 **Shorten a URL:**
 
@@ -30,90 +46,137 @@ URL shortened successfully!
   Short Code : q0U
 ```
 
-**You can also pick your own alias if you want:**
+**Pick your own alias:**
 
 ```
 python main.py shorten https://github.com --alias github
 ```
 
-```
-URL shortened successfully!
-  Original   : https://github.com
-  Short Code : github
-  (custom alias)
-```
-
-**Get the original URL back from a code:**
+**Get the original URL back:**
 
 ```
 python main.py resolve github
 ```
 
-```
-Resolved successfully!
-  Short Code    : github
-  Original URL  : https://github.com
-  Created At    : 2026-09-18 18:30:00
-  Type          : Custom Alias
-```
-
-**See everything you've shortened so far:**
+**See everything:**
 
 ```
 python main.py list
 ```
 
-```
-  Found 2 shortened URL(s):
-
-  Short Code  Original URL                                  Created At           Type
-  ----------  ------------                                  -------------------  ------
-  github      https://github.com                            2026-09-18 18:30:00  Custom
-  q0U         https://www.google.com/search?q=python        2026-09-18 18:29:00  Auto
-```
-
-**Delete one you dont need anymore:**
+**Delete one:**
 
 ```
 python main.py delete q0U
 ```
 
+## Web API
+
+the web server adds user accounts, link expiry, rate limiting, and an analytics page. here are all the endpoints:
+
+### Register
+
+```bash
+curl -X POST http://localhost:5000/register \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "secret123"}'
 ```
-Deleted successfully!
-  Short Code    : q0U
-  Original URL  : https://www.google.com/search?q=python
+
+```json
+{"message": "User 'alice' created successfully", "api_key": "abc123..."}
 ```
 
-i tried to handle most of the error cases i could think of, like if you pass some random string thats not a URL, or try to use an alias someones already taken, or look up a code that doesnt exist. it wont just crash on you, itll tell you what went wrong.
+save that `api_key`, you need it for everything else.
 
-## how it works
+### Login
 
-ok so the short version: theres a counter that starts at 100,000. every time you shorten a URL, i take that counter number and convert it to something called Base62. thats just a fancy way of saying i turn the number into a mix of digits, lowercase letters, and uppercase letters (62 characters total, hence the name). so 100,000 becomes `q0U`, 100,001 becomes `q0V`, and so on.
+```bash
+curl -X POST http://localhost:5000/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "secret123"}'
+```
 
-then the counter goes up by 1 and we do it again next time. thats it. no hashing, no worrying about two URLs accidentally getting the same code. every number is unique so every code is unique.
+returns your api key if you forgot it.
 
-everything gets stored in a SQLite database which is literally just a file called `urls.db`. i picked SQLite because theres nothing to install or set up, Python already has it built in, and it just works.
+### Shorten a URL
 
-## how this relates to actual production systems
+```bash
+curl -X POST http://localhost:5000/shorten \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{"url": "https://www.google.com"}'
+```
 
-so i found [this system design breakdown of how Bitly works](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) and basically tried to copy the same patterns, just way smaller.
+```json
+{"short_code": "q0U", "short_url": "http://localhost:5000/q0U", "original_url": "https://www.google.com"}
+```
 
-like my `shorten` command? thats basically what Bitly's write service does. and `resolve` is their read service. in production those would be completely separate servers because apparently for every 1 person who shortens a URL, like 1000 people end up clicking it. so you need way more read servers than write servers.
+you can also pass `"alias": "whatever"` for a custom short code, and `"ttl_seconds": 300` to make it expire after 5 minutes.
 
-the counter thing is pretty similar too. Bitly uses Redis for their counter (its fast, sits in memory). when they have like 10 servers all shortening URLs at the same time, each server grabs a batch of counter numbers (like 1000 at once) so they dont all fight over the same Redis instance. i obviously dont need to do that for a CLI tool lol but the concept is there.
+### Redirect
 
-oh and i added a database index on the `short_code` column. without that, every time you resolve a code itd have to look through every single row in the table. with the index it just jumps straight to the right one. same thing real databases do when they have millions of rows.
+just visit `http://localhost:5000/q0U` in your browser (or curl it). it redirects to the original URL. this is the only endpoint that doesnt need auth.
 
-a real URL shortener would also have a caching layer so popular links dont hit the database every single time someone clicks them. didnt add that here cause... its a CLI. but if you look at how `resolve` works you can kinda see where youd slot one in.
+### Stats
 
-theres more detail about all this in the [Hello Interview writeup](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly) if youre curious. i also put together a [reference.md](reference.md) that maps out what each part of my code corresponds to in a real production system.
+```bash
+curl http://localhost:5000/stats/q0U -H "X-API-Key: YOUR_API_KEY"
+```
 
-## project structure
+```json
+{"short_code": "q0U", "original_url": "https://www.google.com", "click_count": 3, "created_at": "2026-09-29 18:30:00", "is_custom": false}
+```
+
+you can only see stats for your own URLs.
+
+### Delete
+
+```bash
+curl -X DELETE http://localhost:5000/q0U -H "X-API-Key: YOUR_API_KEY"
+```
+
+you can only delete your own URLs.
+
+### Analytics
+
+```bash
+curl http://localhost:5000/analytics -H "X-API-Key: YOUR_API_KEY"
+```
+
+returns an HTML page with a table of your top 5 URLs sorted by click count.
+
+## Error Codes
+
+| Code | What it means |
+|------|--------------|
+| 400 | bad request (missing fields, invalid URL) |
+| 401 | missing or wrong API key |
+| 403 | trying to access someone else's URL |
+| 404 | short code doesnt exist |
+| 409 | alias already taken or reserved |
+| 410 | link has expired |
+| 429 | rate limited (max 10 shortens per minute) |
+
+## How It Works
+
+ok so the short version: theres a counter that starts at 100,000. every time you shorten a URL, i take that counter number and convert it to Base62 (digits + lowercase + uppercase = 62 characters). so 100,000 becomes `q0U`, 100,001 becomes `q0V`, and so on. no collisions ever because every number is unique.
+
+the CLI (`main.py`) and the web server (`app.py`) both import from `database.py` which has all the shared logic — database setup, Base62 encoding, URL validation, user auth, everything. they share the same `urls.db` database so you can use both at the same time.
+
+passwords are hashed with PBKDF2 (100k iterations, random salt). rate limiting uses a sliding window tracked in memory. link expiry checks happen on access — if a link is expired when someone tries to use it, it gets deleted right then.
+
+theres more detail in [reference.md](reference.md) about how this maps to real production systems, and [explanation.md](explanation.md) walks through the CLI code line by line. [flask_explanation.md](flask_explanation.md) does the same for the web server.
+
+## Project Structure
 
 ```
-├── main.py           - all the code lives here
-├── urls.db           - gets created when you first run it (gitignored)
-├── reference.md      - system design notes
-├── explanation.md    - line by line code walkthrough if youre into that
+├── main.py               - CLI tool
+├── app.py                - Flask web server
+├── database.py           - shared database and auth logic
+├── requirements.txt      - just flask
+├── urls.db               - gets created on first run (gitignored)
+├── reference.md          - system design notes
+├── explanation.md        - line by line CLI walkthrough
+├── flask_explanation.md  - line by line web server walkthrough
 └── README.md
 ```
