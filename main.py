@@ -1,146 +1,16 @@
-import sqlite3
-import os
 import sys
-import string
-from datetime import datetime
-from urllib.parse import urlparse
 import argparse
-
-
-BASE62_CHARACTERS = string.digits + string.ascii_lowercase + string.ascii_uppercase
-
-STARTING_COUNTER_VALUE = 100000
-
-DATABASE_FILENAME = "urls.db"
-
-
-def get_database_path():
-    script_directory = os.path.dirname(os.path.abspath(__file__))
-    database_path = os.path.join(script_directory, DATABASE_FILENAME)
-    return database_path
-
-
-def get_database_connection():
-    database_path = get_database_path()
-    database_connection = sqlite3.connect(database_path)
-    database_connection.row_factory = sqlite3.Row
-    return database_connection
-
-
-def setup_database():
-    database_connection = get_database_connection()
-    database_cursor = database_connection.cursor()
-
-    database_cursor.execute("""
-        CREATE TABLE IF NOT EXISTS urls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            short_code TEXT UNIQUE NOT NULL,
-            original_url TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            is_custom INTEGER NOT NULL DEFAULT 0
-        )
-    """)
-
-    database_cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_short_code ON urls (short_code)
-    """)
-
-    database_cursor.execute("""
-        CREATE TABLE IF NOT EXISTS counter (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            current_value INTEGER NOT NULL
-        )
-    """)
-
-    database_cursor.execute("SELECT COUNT(*) FROM counter")
-    existing_row_count = database_cursor.fetchone()[0]
-
-    if existing_row_count == 0:
-        database_cursor.execute(
-            "INSERT INTO counter (id, current_value) VALUES (1, ?)",
-            (STARTING_COUNTER_VALUE,)
-        )
-
-    database_connection.commit()
-    database_connection.close()
-
-
-def convert_number_to_base62(decimal_number):
-    if decimal_number == 0:
-        return BASE62_CHARACTERS[0]
-
-    base62_digits = []
-
-    remaining_value = decimal_number
-    while remaining_value > 0:
-        remainder_index = remaining_value % 62
-        base62_digits.append(BASE62_CHARACTERS[remainder_index])
-        remaining_value = remaining_value // 62
-
-    base62_digits.reverse()
-
-    return "".join(base62_digits)
-
-
-def get_next_short_code(database_connection):
-    database_cursor = database_connection.cursor()
-
-    database_cursor.execute("SELECT current_value FROM counter WHERE id = 1")
-    counter_row = database_cursor.fetchone()
-    current_counter_value = counter_row["current_value"]
-
-    generated_short_code = convert_number_to_base62(current_counter_value)
-
-    next_counter_value = current_counter_value + 1
-    database_cursor.execute(
-        "UPDATE counter SET current_value = ? WHERE id = 1",
-        (next_counter_value,)
-    )
-
-    return generated_short_code
-
-
-def check_if_url_is_valid(url_string):
-    parsed_url_result = urlparse(url_string)
-
-    has_valid_scheme = parsed_url_result.scheme in ("http", "https")
-    has_domain_name = len(parsed_url_result.netloc) > 0
-
-    return has_valid_scheme and has_domain_name
-
-
-def validate_custom_alias(alias_text, database_connection):
-    if len(alias_text) == 0:
-        return "Custom alias cannot be empty."
-
-    if not alias_text.isalnum():
-        return "Custom alias can only contain letters and numbers."
-
-    database_cursor = database_connection.cursor()
-
-    database_cursor.execute(
-        "SELECT id FROM urls WHERE short_code = ?",
-        (alias_text,)
-    )
-    existing_row = database_cursor.fetchone()
-
-    if existing_row is not None:
-        return f"The alias '{alias_text}' is already taken. Please choose a different one."
-
-    return None
-
-
-def save_url_to_database(database_connection, short_code, original_url, is_custom_alias):
-    database_cursor = database_connection.cursor()
-
-    creation_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    custom_flag = 1 if is_custom_alias else 0
-
-    database_cursor.execute(
-        "INSERT INTO urls (short_code, original_url, created_at, is_custom) "
-        "VALUES (?, ?, ?, ?)",
-        (short_code, original_url, creation_timestamp, custom_flag)
-    )
+from database import (
+    setup_database,
+    get_database_connection,
+    get_next_short_code,
+    check_if_url_is_valid,
+    validate_custom_alias,
+    save_url_to_database,
+    find_url_by_short_code,
+    delete_url_from_database,
+    get_all_urls
+)
 
 
 def handle_shorten_command(url_to_shorten, custom_alias_text):
@@ -183,13 +53,8 @@ def handle_shorten_command(url_to_shorten, custom_alias_text):
 
 def handle_resolve_command(short_code_to_find):
     database_connection = get_database_connection()
-    database_cursor = database_connection.cursor()
 
-    database_cursor.execute(
-        "SELECT original_url, created_at, is_custom FROM urls WHERE short_code = ?",
-        (short_code_to_find,)
-    )
-    found_row = database_cursor.fetchone()
+    found_row = find_url_by_short_code(database_connection, short_code_to_find)
     database_connection.close()
 
     if found_row is None:
@@ -252,13 +117,8 @@ def format_list_table_row(url_row, code_column_width, url_column_width):
 
 def handle_list_command():
     database_connection = get_database_connection()
-    database_cursor = database_connection.cursor()
 
-    database_cursor.execute(
-        "SELECT short_code, original_url, created_at, is_custom "
-        "FROM urls ORDER BY created_at DESC"
-    )
-    all_url_rows = database_cursor.fetchall()
+    all_url_rows = get_all_urls(database_connection)
     database_connection.close()
 
     if len(all_url_rows) == 0:
@@ -282,13 +142,8 @@ def handle_list_command():
 
 def handle_delete_command(short_code_to_delete):
     database_connection = get_database_connection()
-    database_cursor = database_connection.cursor()
 
-    database_cursor.execute(
-        "SELECT original_url FROM urls WHERE short_code = ?",
-        (short_code_to_delete,)
-    )
-    found_row = database_cursor.fetchone()
+    found_row = find_url_by_short_code(database_connection, short_code_to_delete)
 
     if found_row is None:
         print(
@@ -300,10 +155,7 @@ def handle_delete_command(short_code_to_delete):
 
     deleted_original_url = found_row["original_url"]
 
-    database_cursor.execute(
-        "DELETE FROM urls WHERE short_code = ?",
-        (short_code_to_delete,)
-    )
+    delete_url_from_database(database_connection, short_code_to_delete)
 
     database_connection.commit()
     database_connection.close()
