@@ -1,4 +1,3 @@
-import os
 from flask import Flask, request, jsonify, redirect
 from database import (
     setup_database,
@@ -10,15 +9,96 @@ from database import (
     find_url_by_short_code,
     delete_url_from_database,
     increment_click_count,
-    check_if_url_is_expired
+    check_if_url_is_expired,
+    create_new_user,
+    authenticate_user_login,
+    find_user_by_api_key
 )
 
 
 application = Flask(__name__)
 
 
+def get_authenticated_user():
+    api_key_value = request.headers.get("X-API-Key")
+
+    if api_key_value is None:
+        return None, (jsonify({"error": "Missing X-API-Key header"}), 401)
+
+    database_connection = get_database_connection()
+    user_row = find_user_by_api_key(database_connection, api_key_value)
+    database_connection.close()
+
+    if user_row is None:
+        return None, (jsonify({"error": "Invalid API key"}), 401)
+
+    return user_row, None
+
+
+@application.route("/register", methods=["POST"])
+def handle_register_request():
+    request_body = request.get_json()
+
+    if request_body is None:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    username = request_body.get("username")
+    password = request_body.get("password")
+
+    if username is None or password is None:
+        return jsonify({"error": "Missing 'username' or 'password' field"}), 400
+
+    if len(username) < 3:
+        return jsonify({"error": "Username must be at least 3 characters"}), 400
+
+    if len(password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+
+    database_connection = get_database_connection()
+    new_api_key, error_message = create_new_user(database_connection, username, password)
+
+    if error_message is not None:
+        database_connection.close()
+        return jsonify({"error": error_message}), 409
+
+    database_connection.commit()
+    database_connection.close()
+
+    return jsonify({
+        "message": f"User '{username}' created successfully",
+        "api_key": new_api_key
+    }), 201
+
+
+@application.route("/login", methods=["POST"])
+def handle_login_request():
+    request_body = request.get_json()
+
+    if request_body is None:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    username = request_body.get("username")
+    password = request_body.get("password")
+
+    if username is None or password is None:
+        return jsonify({"error": "Missing 'username' or 'password' field"}), 400
+
+    database_connection = get_database_connection()
+    api_key = authenticate_user_login(database_connection, username, password)
+    database_connection.close()
+
+    if api_key is None:
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    return jsonify({"api_key": api_key})
+
+
 @application.route("/shorten", methods=["POST"])
 def handle_shorten_request():
+    authenticated_user, auth_error = get_authenticated_user()
+    if auth_error is not None:
+        return auth_error
+
     request_body = request.get_json()
 
     if request_body is None:
@@ -50,7 +130,10 @@ def handle_shorten_request():
         chosen_short_code = get_next_short_code(database_connection)
         is_custom = False
 
-    save_url_to_database(database_connection, chosen_short_code, url_to_shorten, is_custom, ttl_seconds=ttl_seconds)
+    save_url_to_database(
+        database_connection, chosen_short_code, url_to_shorten, is_custom,
+        ttl_seconds=ttl_seconds, user_id=authenticated_user["id"]
+    )
 
     database_connection.commit()
     database_connection.close()
@@ -96,6 +179,10 @@ def handle_redirect_request(short_code):
 
 @application.route("/stats/<short_code>")
 def handle_stats_request(short_code):
+    authenticated_user, auth_error = get_authenticated_user()
+    if auth_error is not None:
+        return auth_error
+
     database_connection = get_database_connection()
 
     url_row = find_url_by_short_code(database_connection, short_code)
@@ -103,6 +190,10 @@ def handle_stats_request(short_code):
     if url_row is None:
         database_connection.close()
         return jsonify({"error": f"No URL found for '{short_code}'"}), 404
+
+    if url_row["user_id"] != authenticated_user["id"]:
+        database_connection.close()
+        return jsonify({"error": "You don't have access to this URL"}), 403
 
     if check_if_url_is_expired(url_row):
         delete_url_from_database(database_connection, short_code)
@@ -123,11 +214,9 @@ def handle_stats_request(short_code):
 
 @application.route("/<short_code>", methods=["DELETE"])
 def handle_delete_request(short_code):
-    expected_api_key = os.environ.get("API_KEY")
-    provided_api_key = request.headers.get("X-API-Key")
-
-    if expected_api_key is not None and provided_api_key != expected_api_key:
-        return jsonify({"error": "Invalid or missing API key"}), 401
+    authenticated_user, auth_error = get_authenticated_user()
+    if auth_error is not None:
+        return auth_error
 
     database_connection = get_database_connection()
 
@@ -136,6 +225,10 @@ def handle_delete_request(short_code):
     if url_row is None:
         database_connection.close()
         return jsonify({"error": f"No URL found for '{short_code}'"}), 404
+
+    if url_row["user_id"] != authenticated_user["id"]:
+        database_connection.close()
+        return jsonify({"error": "You don't have access to this URL"}), 403
 
     deleted_original_url = url_row["original_url"]
 

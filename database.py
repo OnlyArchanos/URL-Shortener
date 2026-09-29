@@ -1,6 +1,8 @@
 import sqlite3
 import os
 import string
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
@@ -243,4 +245,78 @@ def check_if_url_is_expired(url_row):
     current_datetime = datetime.now()
 
     return current_datetime > expiry_datetime
+
+
+def hash_password(password_text):
+    salt_value = secrets.token_hex(16)
+    password_bytes = password_text.encode("utf-8")
+    salt_bytes = salt_value.encode("utf-8")
+    derived_key = hashlib.pbkdf2_hmac("sha256", password_bytes, salt_bytes, 100000)
+    hash_hex = derived_key.hex()
+    return salt_value + ":" + hash_hex
+
+
+def verify_password(password_text, stored_hash_string):
+    salt_value, expected_hash = stored_hash_string.split(":")
+    password_bytes = password_text.encode("utf-8")
+    salt_bytes = salt_value.encode("utf-8")
+    derived_key = hashlib.pbkdf2_hmac("sha256", password_bytes, salt_bytes, 100000)
+    return derived_key.hex() == expected_hash
+
+
+def generate_api_key():
+    return secrets.token_hex(32)
+
+
+def create_new_user(database_connection, username, password_text):
+    database_cursor = database_connection.cursor()
+
+    database_cursor.execute(
+        "SELECT id FROM users WHERE username = ?",
+        (username,)
+    )
+    existing_user = database_cursor.fetchone()
+
+    if existing_user is not None:
+        return None, "Username is already taken."
+
+    hashed_password = hash_password(password_text)
+    new_api_key = generate_api_key()
+    creation_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    database_cursor.execute(
+        "INSERT INTO users (username, password_hash, api_key, created_at) VALUES (?, ?, ?, ?)",
+        (username, hashed_password, new_api_key, creation_timestamp)
+    )
+
+    return new_api_key, None
+
+
+def authenticate_user_login(database_connection, username, password_text):
+    database_cursor = database_connection.cursor()
+
+    database_cursor.execute(
+        "SELECT password_hash, api_key FROM users WHERE username = ?",
+        (username,)
+    )
+    user_row = database_cursor.fetchone()
+
+    if user_row is None:
+        return None
+
+    if not verify_password(password_text, user_row["password_hash"]):
+        return None
+
+    return user_row["api_key"]
+
+
+def find_user_by_api_key(database_connection, api_key_value):
+    database_cursor = database_connection.cursor()
+
+    database_cursor.execute(
+        "SELECT id, username, created_at FROM users WHERE api_key = ?",
+        (api_key_value,)
+    )
+    user_row = database_cursor.fetchone()
+    return user_row
 
