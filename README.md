@@ -4,6 +4,8 @@ A Python URL shortener with both a CLI and a web API.
 Started as a simple CLI project, then i got carried away and added a whole Flask web server on top of it ✌️ Still no external packages beyond Flask, no third-party API keys, just Python and SQL.
 I tried to follow the same architecture that [Bitly uses in production](https://www.hellointerview.com/learn/system-design/problem-breakdowns/bitly), and kinda adapted it for a local setup.
 
+theres a live version running at **https://url-shortener-5ph2.onrender.com/** if you wanna try it without cloning anything. might take a few seconds to wake up on first load (free tier things).
+
 ## Running It
 
 You need Python 3.6+.
