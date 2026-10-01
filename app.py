@@ -322,6 +322,8 @@ def handle_analytics_request():
     return page_html
 
 
+setup_database()
+
+
 if __name__ == "__main__":
-    setup_database()
     application.run(debug=True, port=5000)
