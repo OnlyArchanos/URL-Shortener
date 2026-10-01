@@ -63,6 +63,36 @@ def get_authenticated_user():
     return user_row, None
 
 
+@application.route("/")
+def handle_landing_page():
+    return (
+        "<html><body style='background:#000;color:#fff;font-family:monospace;"
+        "max-width:600px;margin:80px auto;padding:0 20px;line-height:1.7'>"
+        "<h1>url shortener</h1>"
+        "<p>a python url shortener with a web api. started as a cli project, "
+        "then i got carried away and added a whole flask server on top of it.</p>"
+        "<p>this is an api, not a website. you talk to it from your terminal.</p>"
+        "<h2>quickstart</h2>"
+        "<pre style='background:#111;padding:12px;overflow-x:auto'>"
+        "# register\n"
+        "curl -X POST {url}/register \\\n"
+        "  -H \"Content-Type: application/json\" \\\n"
+        "  -d '{{\"username\":\"you\",\"password\":\"secret123\"}}'\n\n"
+        "# shorten a url (use the api_key from above)\n"
+        "curl -X POST {url}/shorten \\\n"
+        "  -H \"Content-Type: application/json\" \\\n"
+        "  -H \"X-API-Key: YOUR_KEY\" \\\n"
+        "  -d '{{\"url\":\"https://google.com\"}}'\n\n"
+        "# visit your short link\n"
+        "curl {url}/SHORT_CODE"
+        "</pre>"
+        "<p>thats it. "
+        "<a href='https://github.com/OnlyArchanos/URL-Shortener' style='color:#aaa'>source code</a>"
+        " · made by <a href='https://github.com/OnlyArchanos/' style='color:#aaa'>@OnlyArchanos</a></p>"
+        "</body></html>".format(url=request.host_url.rstrip("/"))
+    )
+
+
 @application.route("/register", methods=["POST"])
 def handle_register_request():
     request_body = request.get_json()
